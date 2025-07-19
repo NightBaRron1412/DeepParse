@@ -1,0 +1,12 @@
+torch==2.1.0
+transformers==4.36.2
+accelerate==0.25.0
+bitsandbytes==0.41.3
+peft==0.7.1
+datasets==2.16.1
+pandas==2.1.4
+numpy==1.26.2
+logparser==2.1.1
+scikit-learn==1.3.2
+tqdm==4.66.1
+ipywidgets==8.1.1
