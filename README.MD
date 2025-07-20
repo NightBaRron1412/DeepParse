@@ -93,7 +93,7 @@ The entire replication workflow is contained within the `main.py` file.
 
 ## Replication of Results
 
-The notebook aims to reproduce the key results of the paper, primarily the **Parsing Accuracy (PA)** and **Grouping Accuracy (GA)** scores presented in Table 1.
+The repo aims to reproduce the key results of the paper, primarily the **Parsing Accuracy (PA)** and **Grouping Accuracy (GA)** scores presented in Table 1.
 
 - **Baselines**: The notebook first evaluates the Drain and Logram parsers.
 - **DeepParse**: Implements the full DeepParse pipeline. Fine-tuning is computationally intensive but crucial for high accuracy.
