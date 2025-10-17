@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+title: DeepParse Artifact
+message: If you use this artifact, please cite the associated paper.
+authors:
+  - family-names: DeepParse
+    given-names: Artifact Team
+    affiliation: Anonymous
+    orcid: https://orcid.org/0000-0000-0000-0000
+version: 1.0.0
+doi: 10.0000/zenodo.0000000
+date-released: 2024-01-01
+url: https://example.org/deepparse-artifact

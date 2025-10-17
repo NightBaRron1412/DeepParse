@@ -1,0 +1,11 @@
+__pycache__/
+.artifacts/
+artifacts/data/*
+!artifacts/data/.gitkeep
+artifacts/outputs/*
+!artifacts/outputs/.gitkeep
+artifacts/masks/*.json
+!artifacts/masks/.gitkeep
+*.pyc
+.venv/
+uv.lock.bak

@@ -1,0 +1,20 @@
+base_config: configs/default.yaml
+datasets:
+  - HDFS
+  - Hadoop
+  - Spark
+  - Zookeeper
+  - BGL
+  - OpenStack
+  - Thunderbird
+  - Windows
+  - Linux
+  - HealthApp
+  - Apache
+  - HadoopApp
+  - SparkApp
+  - Android
+  - Mac
+  - Proxifier
+output_csv: artifacts/outputs/table_I_ga_pa.csv
+timing_csv: artifacts/outputs/table_II_timing.csv
