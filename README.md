@@ -1,13 +1,5 @@
 # deepparse-artifact
 
-> **Acceptance Criteria**
-> 1. `make setup && ./scripts/run_demo.sh` completes on a blank CPU machine in < 3 minutes and prints GA/PA for a toy dataset.
-> 2. `python -m deepparse.cli synth --dataset <name> --k 50 --mode offline` creates `artifacts/masks/<name>.json` with ≥4 canonical regex classes (timestamp, IP, numeric, level) and passes regex validation.
-> 3. `python -m deepparse.cli eval --config configs/eval_16_datasets.yaml` produces per-dataset GA/PA CSVs and a macro-average row; DeepParse columns are populated.
-> 4. `python -m deepparse.cli time --dataset <name> --n 100` outputs a timing CSV suitable for Table II.
-> 5. `./scripts/regenerate_tables.sh` emits `table_I.tex` and `table_II.tex` whose numbers match the produced CSVs.
-> 6. All tests in `tests/` pass on CI.
-
 ## Abstract
 DeepParse is a hybrid log parsing system that combines one-time large language model (LLM) assisted synthesis of regex masks with deterministic Drain parsing. This repository packages the full artifact for the paper “DeepParse: A Hybrid LLM-Enhanced Framework for Accurate Log Parsing,” providing scripts, configuration files, datasets layout, evaluation harnesses, and reproducible outputs for reviewers. All computations are deterministic, seeds are logged for every run, and the codebase is double-blind ready (no names or telemetry).
 
