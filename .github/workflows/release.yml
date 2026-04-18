@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build wheel + create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Extract changelog excerpt for this tag
+        id: changelog
+        # Both inputs are git-controlled (only tag pushers / workflow_dispatch
+        # users can trigger this) but we still pipe them through `env:` and
+        # quote in shell for defence in depth (per GH Actions hardening guide).
+        env:
+          REF_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${REF_NAME#v}"
+          if grep -q "^## \[${VERSION}\]" CHANGELOG.md; then
+              awk -v ver="$VERSION" '
+                  $0 ~ "^## \\["ver"\\]" { capture=1; next }
+                  capture && /^## \[/      { exit }
+                  capture                  { print }
+              ' CHANGELOG.md > release_notes.md
+          else
+              printf "Release %s.\n" "$REF_NAME" > release_notes.md
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: "DeepParse v${{ steps.changelog.outputs.version }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

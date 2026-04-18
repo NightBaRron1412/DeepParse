@@ -21,9 +21,9 @@ from .utils.regex_library import validate_regexes
 from .utils.sampling import deterministic_sample
 
 try:  # Optional heavy dependency
-    from .synth.hf_deepseek_r1 import synthesize_hf
+    from .synth.hf_deepseek_r1 import synthesize_hf as _synthesize_hf
 except Exception:  # pragma: no cover - optional path
-    synthesize_hf = None
+    _synthesize_hf = None  # type: ignore[assignment]
 
 MaskLike = Union[Mask, dict]
 
@@ -67,9 +67,9 @@ def synth_masks(
     if mode == "offline":
         masks = synthesize_offline(sample)
     elif mode == "hf":
-        if synthesize_hf is None:  # pragma: no cover - optional dependency
+        if _synthesize_hf is None:  # pragma: no cover - optional dependency
             raise RuntimeError("Hugging Face mode requested but transformers is unavailable")
-        masks = synthesize_hf(
+        masks = _synthesize_hf(
             sample,
             model_name=model_name or "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
             adapter_path=adapter_path,

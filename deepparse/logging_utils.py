@@ -9,7 +9,7 @@ from typing import Optional
 try:  # Rich is optional; fall back to basic StreamHandler when unavailable
     from rich.logging import RichHandler
 except Exception:  # pragma: no cover - exercised when rich is absent
-    class RichHandler(logging.StreamHandler):
+    class RichHandler(logging.StreamHandler):  # type: ignore[no-redef]
         """Fallback handler mimicking :class:`rich.logging.RichHandler` signature."""
 
         def __init__(self, *args, **kwargs) -> None:
@@ -32,7 +32,7 @@ def configure_logging(log_dir: str, log_name: str) -> Path:
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     log_path = Path(log_dir) / f"{log_name}.log"
 
-    handlers = [RichHandler(rich_tracebacks=True, markup=True)]
+    handlers: list[logging.Handler] = [RichHandler(rich_tracebacks=True, markup=True)]
 
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)

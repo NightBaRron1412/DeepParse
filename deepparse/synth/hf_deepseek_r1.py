@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Hugging Face inference backend for the DeepParse mask synthesiser.
 
 Loads a base model (paper default: ``deepseek-ai/DeepSeek-R1-Distill-Llama-8B``)
