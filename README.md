@@ -1,165 +1,178 @@
-# deepparse-artifact
+# DeepParse — Hybrid LLM-Assisted Log Parsing
 
-## Abstract
-DeepParse is a hybrid log parsing system that combines one-time large language model (LLM) assisted synthesis of regex masks with deterministic Drain parsing. This repository packages the full artifact for the paper “DeepParse: A Hybrid LLM-Enhanced Framework for Accurate Log Parsing,” providing scripts, configuration files, datasets layout, evaluation harnesses, and reproducible outputs for reviewers. All computations are deterministic, seeds are logged for every run, and the codebase is double-blind ready (no names or telemetry).
+> Reproducible artifact accompanying the paper
+> **DeepParse: Hybrid Log Parsing with LLM-Synthesized Regex Masks**
+> (Shetaia & Kauffman, EASE 2026).
 
-## Architecture Overview
+DeepParse separates *stochastic mask synthesis* (offline, one-shot, LLM-assisted)
+from *deterministic parsing* (online, fixed-time, Drain-style). At install time
+a regex *mask bundle* is mined from a small log sample; at run time those masks
+substitute typed placeholders (`<VAR:IP>`, `<VAR:TIMESTAMP>`, …) into every
+incoming line and a Drain parser clusters the masked tokens.
+
 ```
-+---------------------+          +--------------------+
-| k-sample selection  | --50-->  | LLM/stub mask gen  |
-+---------------------+          +--------------------+
-            |                              |
-            v                              v
-    artifacts/masks/*.json      validated regex masks
-            |                              |
-            +--------------v---------------+
-                           |
-                   Drain parser engine
-                           |
-                    parsed templates
-                           |
-             +----------------------------+
-             | Metrics (GA/PA) & timing   |
-             +----------------------------+
+┌────────────────────┐  k=50  ┌─────────────────────┐
+│  raw log corpus    │ ─────► │ entropy-greedy      │
+└────────────────────┘        │ sampling (Alg. 1)   │
+                              └────────┬────────────┘
+                                       ▼
+                              ┌─────────────────────┐
+                              │ LLM / offline stub  │  ─►  artifacts/masks/*.json
+                              │ → regex bundle      │
+                              └────────┬────────────┘
+                                       ▼  load_masks
+                              ┌─────────────────────┐
+   raw lines ───────────────► │ Mask-First applier  │
+                              │ (typed placeholders)│
+                              └────────┬────────────┘
+                                       ▼  Drain (depth=4)
+                              ┌─────────────────────┐
+                              │ template + cluster  │
+                              │ id per log line     │
+                              └────────┬────────────┘
+                                       ▼  GA / PA metrics
+                              ┌─────────────────────┐
+                              │ artifacts/outputs/  │
+                              │   *.csv, *.tex      │
+                              └─────────────────────┘
 ```
 
-## Repository Layout
-The tree below highlights the most relevant folders. All generated artifacts (logs, CSVs, LaTeX tables) live under `artifacts/outputs/` and are gitignored.
+## Repository layout
 
-- `deepparse/`: Source code for the CLI, mask synthesis, Drain parser, metrics, evaluation harness, utilities, and deterministic helpers.
-- `configs/`: YAML configuration snapshots for demo and 16-dataset evaluation.
-- `scripts/`: Shell helpers for environment setup, dataset fetching, evaluation orchestration, and table regeneration.
-- `artifacts/`: Placeholder directories for datasets, outputs, and synthesized masks.
-- `tests/`: Unit and integration tests with a golden snapshot for CLI output.
-- `anonymization/`: Utilities to scrub host-specific paths in generated artifacts.
+```
+deepparse/                    Python package
+  api.py                      Public Drain + synth_masks helpers (paper Listing 1)
+  cli.py                      `deepparse` Click CLI (synth/parse/eval/time/table)
+  drain/                      Mask applier + Drain engine (typed placeholders)
+  synth/                      Offline stub + optional Hugging Face backend
+  utils/                      Entropy-greedy sampling, regex library, YAML loader
+  metrics/                    Grouping accuracy + parsing accuracy
+  evaluation/                 Eval runner, timing benchmark, LaTeX table writer
+configs/                      YAML configs for demo and 16-dataset eval
+scripts/                      Shell wrappers for path prep, demo, table regen
+tests/                        Unit + integration tests (23 tests, < 1s)
+artifacts/                    Generated outputs (gitignored except .gitkeep)
+```
 
-## Getting Started
-### Prerequisites
-- Python 3.11
-- Git
-- Optional: Conda, Docker, GNU Make, UV package manager.
+## Quick start (≤ 30 s, CPU only, no internet)
 
-### Environment Setup Options
-We provide three reproducible setup pathways:
-
-1. **Makefile/UV workflow (recommended):**
-   ```bash
-   make setup
-   ```
-2. **pip-tools/UV lock install:**
-   ```bash
-   uv sync
-   ```
-3. **Conda environment:**
-   ```bash
-   conda env create -f environment.yml
-   conda activate deepparse-artifact
-   ```
-4. **Docker:**
-   ```bash
-   docker build -t deepparse-artifact .
-   docker run --rm -it -v $PWD:/workspace deepparse-artifact
-   ```
-
-All pathways ensure deterministic dependencies pinned to versions tested in CI.
-
-## Reproduction Tiers
-DeepParse supports three reproducibility tiers to accommodate different resource levels.
-
-### Tier A – No GPU Demo (≤3 minutes)
 ```bash
-make setup
-./scripts/prepare_paths.sh
-./scripts/run_demo.sh
+pip install -e ".[test,lint]"
+make demo
 ```
-This mode uses the offline regex stub and a tiny bundled dataset to demonstrate mask synthesis, parsing, and GA/PA metrics entirely on CPU without internet access.
 
-### Tier B – CPU-only Full Evaluation
+You should see:
+
+```
+Dataset DemoTiny: GA=1.000 PA=1.000
+Wrote metrics CSV to artifacts/outputs/demo_metrics.csv
+```
+
+The demo synthesises a mask bundle from a bundled 14-line corpus and prints
+GA/PA against ground-truth templates that are themselves generated by running
+the canonical regex bundle through Drain (so any faithful implementation of
+the algorithm reaches 1.0 on this trivial corpus).
+
+## Running the test suite
+
 ```bash
-./scripts/prepare_paths.sh
-./scripts/fetch_datasets.sh        # or manually place data
-python -m deepparse.cli synth --dataset ALL --k 50 --mode offline
-python -m deepparse.cli eval --config configs/eval_16_datasets.yaml --deterministic
-python -m deepparse.cli table --inputs artifacts/outputs/*.csv --out artifacts/outputs/tables/
-./scripts/regenerate_tables.sh
+make test         # 23 tests, < 1s
+make lint         # ruff
 ```
-Runs Drain parsing over all 16 corrected LogHub datasets, computing GA/PA metrics and reproducing Table I/II numbers. Expect longer runtimes on CPU but identical outputs to GPU mode.
-
-### Tier C – GPU Fast Path
-```bash
-python -m deepparse.cli eval --config configs/eval_16_datasets.yaml --deterministic --device cuda
-```
-When CUDA is available, Drain’s tensorized similarity checks and optional HF mode mask refinement leverage the GPU for faster processing. Determinism is preserved by enabling `torch.backends.cudnn.deterministic` when `--deterministic` is passed.
-
-## Command Line Interface
-The CLI bundles four subcommands:
-
-- `synth`: Generate regex mask lists using the offline stub or optional Hugging Face pipeline.
-- `parse`: Apply masks and Drain parser to produce structured templates for a dataset.
-- `eval`: Run the entire benchmark, computing GA and PA metrics for each dataset and macro averages.
-- `time`: Benchmark parsing throughput on 100 logs (Table II).
-- `table`: Convert CSV outputs into LaTeX tables.
-
-See `python -m deepparse.cli --help` for the full argument list.
 
 ## Programmatic API
-For quick experiments the package exposes a minimal API aligned with the paper’s
-Figure 2 workflow:
+
+The public API mirrors Listing 1 of the paper verbatim:
 
 ```python
 from deepparse import Drain, synth_masks
 
-patterns = synth_masks(sys_logs, sample_size=500, temperature=0, num_beams=2, max_length=512)
+patterns = synth_masks(sys_logs, sample_size=50, temperature=0, max_length=512)
 drain = Drain()
 drain.load_masks(patterns)
-parsed_templates = drain.parse_all(sys_logs)
+parsed = drain.parse_all(sys_logs)
 ```
 
-`synth_masks` returns a list of dictionaries containing `label`, `pattern`, and
-`justification` fields. The offline mode is fully deterministic; switching to
-`mode="hf"` enables the optional Hugging Face pipeline with the same control
-parameters (`temperature`, `num_beams`, `max_length`).
+`synth_masks` returns a list of `{"label", "pattern", "justification"}` dicts.
+`mode="offline"` (default) is fully deterministic and pure-CPU; `mode="hf"`
+invokes the optional Hugging Face pipeline (install with `pip install -e ".[hf]"`).
 
-## Data Availability
-The corrected LogHub datasets are public but must be downloaded separately to preserve double-blind review. Use `./scripts/fetch_datasets.sh` for online retrieval or copy the datasets into `artifacts/data/<DATASET_NAME>/` manually. Checksums are verified on load; mismatches trigger actionable error messages.
+## CLI
 
-## Determinism & Seeds
-Deterministic behavior is enforced across Python’s `random`, NumPy, and PyTorch (if available). The `deepparse.seeds.set_global_seed` function applies consistent seeds, logs the seed value, and optionally sets deterministic CUDA flags. CLI commands expose a `--seed` option for reproducibility and record seeds in `artifacts/outputs/logs/`. Sampling of k logs uses a stratified deterministic algorithm to ensure identical subsets across runs.
+```
+deepparse synth   --dataset DemoTiny --mode offline --out artifacts/masks/DemoTiny.json
+deepparse parse   --dataset DemoTiny --output artifacts/outputs/demo_parsed.csv
+deepparse eval    --config configs/demo_small.yaml --deterministic
+deepparse time    --dataset DemoTiny --n 100
+deepparse table   --inputs artifacts/outputs/demo_metrics.csv --out artifacts/outputs/tables/
+```
 
-## Double-Blind Compliance Checklist
-- Repository name and contents omit author identities.
-- No telemetry, analytics, or network beacons are included.
-- Offline workflows are fully supported.
-- The anonymization scripts scrub hostnames and absolute paths before logs are stored.
+`deepparse --help` and `deepparse <subcommand> --help` list every option.
 
-## Mask Regeneration Guidance
-When log schemas drift, regenerate masks with:
+## Reproduction tiers
+
+### Tier A — Bundled demo (this repo)
+
+`make demo` runs end to end with no external data. GA/PA both reach 1.0
+because ground truth on the bundled corpus is generated by the same canonical
+mask bundle that the offline stub mirrors.
+
+### Tier B — 16-dataset LogHub evaluation
+
+The 16 corrected LogHub datasets are not redistributed with this artifact.
+Place each dataset under `artifacts/data/<NAME>/raw.log`, optionally with a
+companion `artifacts/data/<NAME>/templates.json` (`{"entries": [{"cluster_id":
+int, "template": str}, ...]}`) for annotated ground truth, then:
+
 ```bash
-python -m deepparse.cli synth --dataset <name> --k 50 --mode offline --out artifacts/masks/<name>.json
+./scripts/prepare_paths.sh
+deepparse eval --config configs/eval_16_datasets.yaml --deterministic
+deepparse table --inputs artifacts/outputs/table_I_ga_pa.csv --out artifacts/outputs/tables/
 ```
-Validate using the built-in regex compilation checks (`--strict` to forbid greedy `.*`). For best results, refresh the mask whenever new log templates are introduced.
 
-## Troubleshooting
-- **Regex validation failure:** Check `artifacts/outputs/logs/*.log` for the offending pattern and adjust the mask generator prompt or stub heuristics.
-- **Slow I/O:** Use `--workers` on the CLI to parallelize dataset loading; the CPU pipeline is I/O bound for large datasets.
-- **Missing CUDA:** Run with `--device cpu`; the deterministic flag forces CPU execution when GPUs are absent.
-- **Dataset missing:** Ensure the dataset folder under `artifacts/data/` matches the dataset name in configs.
+When `templates.json` is absent the runner falls back to a *canonical* ground
+truth (the built-in `REGEX_CLASSES` bundle run through Drain), which is the
+same oracle used for DemoTiny.
 
-## Open Science Assets
-All CSV results, LaTeX tables, and logs are written to `artifacts/outputs/`. Config snapshots used to reproduce experiments are kept under `configs/`. The repository includes `THIRD_PARTY_NOTICES.md` listing all third-party dependencies and licenses.
+### Tier C — GPU / Hugging Face mask synthesis
 
-## Regenerating Figures and Tables
-Run:
+Install the optional dependencies and switch to `--mode hf`:
+
 ```bash
-./scripts/regenerate_tables.sh
+pip install -e ".[hf]"
+deepparse synth --dataset DemoTiny --mode hf --out artifacts/masks/DemoTiny.json
 ```
-This command rebuilds Table I and Table II LaTeX/CSV files from the most recent evaluation outputs.
 
-## Continuous Integration
-GitHub Actions (`.github/workflows/ci.yml`) run linting (`ruff`), unit tests (`pytest -q`), and the tiny demo pipeline to guarantee reproducibility and correctness for every commit.
+## Determinism
 
-## Citation
-See `CITATION.cff` for how to cite this artifact.
+`deepparse.seeds.set_global_seed` seeds Python `random`, NumPy, and PyTorch
+when each is available, optionally enabling deterministic CUDA flags.
+Sampling, mask synthesis (offline mode), and parsing are all deterministic
+functions of their inputs.
+
+## Algorithm: entropy-greedy sampling
+
+Implemented in `deepparse/utils/sampling.py` per the paper's Algorithm 1:
+
+1. Replace digits and hex literals with placeholders so numeric noise does
+   not dominate the entropy.
+2. Compute Shannon entropy on the per-line token-frequency distribution.
+3. Greedily pick the highest-entropy candidates, rejecting any whose Jaccard
+   similarity with an already-picked line is ≥ 0.8.
+
+## Limitations
+
+* The four "core" mask classes (`TIMESTAMP`, `LOGLEVEL`, `NUMBER`, `IPV4`) are
+  always emitted by the offline stub regardless of whether the sampled logs
+  exercise each class — this is intentional and mirrors the LLM behaviour
+  documented in the paper, but it can cause spurious labelling on logs that
+  truly contain no timestamps.
+* The fine-tuned `DeepSeek-R1:8B` checkpoint described in the paper is *not*
+  redistributed in this artifact. The optional `mode="hf"` backend will load
+  whatever checkpoint is provided via `--model-name`.
+* Tier B requires the corrected LogHub datasets, which must be downloaded by
+  the user.
 
 ## License
-Licensed under the Apache License, Version 2.0. See `LICENSE` for details.
+
+Apache 2.0 — see `LICENSE` and `THIRD_PARTY_NOTICES.md`.

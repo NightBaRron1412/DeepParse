@@ -1,28 +1,29 @@
-.PHONY: setup lint test demo tables docker
+.PHONY: setup lint test demo tables docker clean
 
-PYTHON?=python3
-VENV?=.venv
+PYTHON ?= python3
+PIP    ?= pip
 
 setup:
-uv sync
+	$(PIP) install -e ".[test,lint]"
 
 lint:
-uv run ruff check deepparse tests
+	ruff check deepparse tests
 
 test:
-uv run pytest -q
+	pytest -q
 
-_demo_common:
-./scripts/prepare_paths.sh
-uv run python -m deepparse.cli synth --config configs/demo_small.yaml --mode offline
-uv run python -m deepparse.cli eval --config configs/demo_small.yaml --deterministic
-
-demo: _demo_common
-uv run python -m deepparse.cli table --inputs artifacts/outputs/demo_metrics.csv --out artifacts/outputs/tables/
-
+demo:
+	./scripts/prepare_paths.sh
+	deepparse synth --dataset DemoTiny --mode offline --out artifacts/masks/DemoTiny.json
+	deepparse eval --config configs/demo_small.yaml --deterministic
+	deepparse table --inputs artifacts/outputs/demo_metrics.csv --out artifacts/outputs/tables/
 
 tables:
-./scripts/regenerate_tables.sh
+	./scripts/regenerate_tables.sh
 
 docker:
-docker build -t deepparse-artifact .
+	docker build -t deepparse-artifact .
+
+clean:
+	rm -rf artifacts/data/DemoTiny artifacts/masks/*.json
+	rm -rf artifacts/outputs/*.csv artifacts/outputs/tables artifacts/outputs/logs
