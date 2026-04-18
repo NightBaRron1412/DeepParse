@@ -179,6 +179,16 @@ class DrainEngine:
 
         Two-pass: first add every line so the cluster templates converge,
         then look up the final template for each line by cluster id.
+
+        .. warning::
+           The returned templates are a *snapshot* taken at the end of
+           this call.  If you subsequently call :meth:`add_log` (or
+           :meth:`parse_with_ids` / :meth:`parse` again with new lines),
+           the cluster templates may merge further and the strings
+           previously returned will no longer reflect the engine's
+           current state.  For the paper-aligned usage (Listing 1:
+           ``Drain().load_masks(p).parse_all(logs)``) this is irrelevant
+           because the entire corpus is processed in a single call.
         """
         line_list = list(lines)
         cluster_ids: List[int] = [self.add_log(line).cluster_id for line in line_list]

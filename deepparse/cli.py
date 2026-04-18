@@ -1,6 +1,7 @@
 """Command line entrypoints for DeepParse artifact."""
 from __future__ import annotations
 
+import csv
 import glob
 import json
 from pathlib import Path
@@ -93,10 +94,14 @@ def parse(ctx: click.Context, dataset: str, output: Optional[str], seed: Optiona
     templates = engine.parse(dataset_obj.logs)
     output_path = Path(output or paths.output_dir / f"{dataset}_parsed.csv")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as fh:
-        fh.write("log,template\n")
+    with output_path.open("w", encoding="utf-8", newline="") as fh:
+        # Use the stdlib CSV writer so log/template strings containing
+        # ", \, or newlines are properly escaped (manual f-string
+        # quoting silently corrupted rows on logs with embedded quotes).
+        writer = csv.writer(fh, quoting=csv.QUOTE_ALL)
+        writer.writerow(["log", "template"])
         for log, template in zip(dataset_obj.logs, templates):
-            fh.write(f"\"{log}\",\"{template}\"\n")
+            writer.writerow([log, template])
     click.echo(f"Wrote parsed templates to {output_path}")
 
 

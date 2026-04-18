@@ -85,19 +85,13 @@ def entropy_greedy_sample(logs: Sequence[str], k: int) -> List[int]:
             selected_token_sets.append(candidate)
             if len(selected) >= k:
                 break
-
-    if len(selected) < k:
-        # Pool exhausted by Jaccard rejection — back-fill with remaining
-        # highest-entropy indices that haven't been picked yet.
-        already = set(selected)
-        for _entropy, idx in entropies:
-            if idx in already:
-                continue
-            selected.append(idx)
-            already.add(idx)
-            if len(selected) >= k:
-                break
-    return selected[:k]
+    # Paper Algorithm 1 returns S where |S| ≤ k.  If the corpus is so
+    # homogeneous that the Jaccard < 0.8 constraint cannot be satisfied
+    # k times, we deliberately return fewer than k items rather than
+    # back-fill with near-duplicates — back-filling would silently
+    # violate the diversity guarantee in Section "Entropy-Greedy
+    # Sampling" and pollute the LLM training prompt with redundant logs.
+    return selected
 
 
 def deterministic_sample(logs: Sequence[str], k: int) -> List[str]:

@@ -196,14 +196,37 @@ def synthesize_hf(
     }
 
     for line in logs:
-        prompt = PROMPT_TEMPLATE.format(instruction=INSTRUCTION, input=line)
-        inputs = tokenizer(prompt, return_tensors="pt").to(target_device)
+        base_prompt = PROMPT_TEMPLATE.format(instruction=INSTRUCTION, input=line)
         patterns: list[str] = []
         for attempt in range(self_consistency_attempts):
+            # Paper, Section "Prompt Engineering and Inference": the
+            # self-consistency loop re-prompts with targeted feedback
+            # describing the failure mode.  We approximate this here by
+            # (1) varying the prompt on retry to nudge the model toward
+            # emitting a clean Python list, and (2) bumping temperature
+            # slightly off greedy on retry so the second attempt is
+            # actually different from the first (a pure retry at
+            # temperature 0 produces the same output and is a no-op).
+            if attempt == 0:
+                prompt = base_prompt
+                attempt_kwargs = gen_kwargs
+            else:
+                prompt = (
+                    base_prompt
+                    + "Return ONLY a Python list of raw regex strings, e.g. "
+                      '[r"\\d+", r"\\b[A-Z]+\\b"]. No prose, no markdown.\n\n'
+                      "### Output:\n"
+                )
+                attempt_kwargs = dict(gen_kwargs)
+                attempt_kwargs["do_sample"] = True
+                attempt_kwargs["temperature"] = 0.3
+            inputs = tokenizer(prompt, return_tensors="pt").to(target_device)
             with torch.no_grad():
-                out_ids = model.generate(**inputs, **gen_kwargs)
-            decoded = tokenizer.decode(out_ids[0][inputs["input_ids"].shape[-1]:],
-                                       skip_special_tokens=True)
+                out_ids = model.generate(**inputs, **attempt_kwargs)
+            decoded = tokenizer.decode(
+                out_ids[0][inputs["input_ids"].shape[-1]:],
+                skip_special_tokens=True,
+            )
             patterns = _parse_regex_list(decoded)
             if patterns:
                 break

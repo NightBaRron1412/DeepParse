@@ -10,7 +10,7 @@ shallow, deterministic, and stable while preserving structural intent.
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 from ..masks_types import Mask
 
@@ -59,8 +59,3 @@ class MaskApplier:
         for _mask, compiled, placeholder in self._compiled:
             masked_line = compiled.sub(placeholder, masked_line)
         return masked_line
-
-    def apply_tokens(self, tokens: Iterable[str]) -> List[str]:
-        joined = " ".join(tokens)
-        masked = self.apply(joined)
-        return masked.split()

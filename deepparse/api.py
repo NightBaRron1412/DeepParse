@@ -44,7 +44,11 @@ def synth_masks(
     *,
     mode: str = "offline",
     temperature: float = 0.0,
-    num_beams: int = 2,
+    # Paper, Section "Prompt Engineering and Inference": "we use greedy
+    # decoding (temperature zero) to minimize output variance".  Greedy
+    # decoding == num_beams=1; defaulting to 2 silently turned on beam
+    # search and contradicted the paper protocol.
+    num_beams: int = 1,
     max_length: int = 512,
     strict: bool = False,
     model_name: str | None = None,
