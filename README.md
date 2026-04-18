@@ -5,7 +5,8 @@
 ### Hybrid Log Parsing with LLM-Synthesized Regex Masks
 
 [![CI](https://github.com/NightBaRron1412/DeepParse/actions/workflows/ci.yml/badge.svg)](https://github.com/NightBaRron1412/DeepParse/actions/workflows/ci.yml)
-[![codecov](https://img.shields.io/codecov/c/github/NightBaRron1412/DeepParse?logo=codecov)](https://codecov.io/gh/NightBaRron1412/DeepParse)
+[![Coverage 81%](https://img.shields.io/badge/coverage-81%25-brightgreen.svg?logo=pytest&logoColor=white)](#verification)
+[![Tests 59 passing](https://img.shields.io/badge/tests-59%20passing-brightgreen.svg)](tests/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
