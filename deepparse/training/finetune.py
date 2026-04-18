@@ -48,6 +48,10 @@ class FineTuneConfig:
     # Default fp32 for cross-vendor stability (works on NVIDIA + AMD).
     # The paper uses bf16; pass --bf16 once your stack is verified stable.
     bf16: bool = False
+    # Eager attention is the cross-vendor-safe default (see comment in
+    # run_training).  Pass --attn-impl=sdpa or =flash_attention_2 to opt
+    # back into the faster kernels when your stack supports them.
+    attn_implementation: str = "eager"
     seed: int = 1337
     eval_split: float = 0.0
     save_steps: int = 200
@@ -146,11 +150,18 @@ def run_training(cfg: FineTuneConfig) -> None:  # pragma: no cover - heavy
     # vendor.  When --bf16 is passed we also force the LoRA adapter
     # parameters to fp32 below, which is the standard mitigation.
     dtype = torch.bfloat16 if cfg.bf16 and torch.cuda.is_available() else torch.float32
+    # attn_implementation="eager" is the safe portable choice: SDPA and
+    # Flash-Attention both occasionally produce NaN gradients on AMD
+    # ROCm builds (and on some older NVIDIA driver / torch combinations).
+    # Eager attention is slower but trains correctly across vendors.
+    # Pass --attn-impl=sdpa to opt back into SDPA when your stack is
+    # verified stable.
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
         torch_dtype=dtype,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
+        attn_implementation=cfg.attn_implementation,
     )
     # gradient_checkpointing + LoRA needs use_cache=False AND
     # enable_input_require_grads().  Without the latter, gradients are
@@ -264,6 +275,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--bf16", action="store_true",
                         help="Use bf16 mixed precision (default: float32 for ROCm stability)")
+    parser.add_argument("--attn-impl", type=str, default=None,
+                        choices=["eager", "sdpa", "flash_attention_2"],
+                        help="Attention kernel (default: eager — cross-vendor safe; SDPA "
+                             "and Flash-Attention occasionally produce NaN grads on AMD ROCm "
+                             "and on torch built against a different ROCm version than the host).")
     args = parser.parse_args(argv)
 
     if args.small:
@@ -285,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.seed = args.seed
     if args.bf16:
         cfg.bf16 = True
+    if args.attn_impl:
+        cfg.attn_implementation = args.attn_impl
 
     run_training(cfg)
     return 0
