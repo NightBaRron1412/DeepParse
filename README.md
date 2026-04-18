@@ -229,6 +229,26 @@ artifacts/                  Generated outputs (gitignored except .gitkeep)
 
 The Drain engine guarantees that **identical log lines always receive the same template ID** — a property called out explicitly in the paper (Section *Integration with Drain*) and verified by `tests/test_drain_masks.py::test_identical_lines_get_identical_template_ids`.
 
+## Verification
+
+Every reproduction tier is exercised end-to-end before each release:
+
+| Step | Command | Expected outcome |
+|---|---|---|
+| Unit + property tests | `pytest -q --cov` | 59 passed, coverage ≥ 80 % |
+| Lint | `ruff check deepparse tests` | clean |
+| Type check | `mypy` | clean (28 source files) |
+| Build | `python -m build` | sdist + wheel under `dist/` |
+| Tier A demo | `make demo` | DemoTiny GA = PA = 1.000 |
+| Tier B Apache | `./examples/03_loghub_offline_eval.sh Apache` | Apache GA = PA = 1.000 |
+| Tier C training | `./examples/04_finetune_and_eval.sh` | Adapter saved, real masks generated |
+
+The Tier C run was reproduced on AMD MI300A (cr66-8, ROCm 7.3) for the v1.0.0
+release: 25-epoch LoRA fine-tune of `deepseek-ai/DeepSeek-R1-Distill-Llama-8B`
+converged from train_loss **2.38 → 0.09** in 33 min; the trained adapter
+generates system-specific masks such as `blk_-?\d+` (HDFS block IDs) and
+`0x[0-9a-fA-F]+` (BGL hex literals) that are not in the canonical-stub bundle.
+
 ## Citation
 
 ```bibtex

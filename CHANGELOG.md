@@ -82,6 +82,23 @@ EASE 2026 paper *DeepParse: Hybrid Log Parsing with LLM-Synthesized Regex Masks*
   rather than JSON-double-escaped patterns (`r"\\d+"`).
 - Eval runner now reads annotated `templates.json` ground truth when present
   and falls back to the canonical-regex oracle otherwise.
+- Default `attn_implementation="eager"` to avoid SDPA / Flash-Attention NaN
+  gradients on AMD ROCm and on torch wheels built against a different ROCm
+  version than the host driver. `--attn-impl=sdpa` opts back into the faster
+  kernel when the stack is verified stable.
+
+### Verified
+
+- 59 unit + property-based + integration tests pass in < 6 s; coverage 80.6 %.
+- `ruff` and `mypy` both clean across all 28 source files.
+- All five reproduction tier examples (`examples/01_…` through `05_…`) run
+  end-to-end on a clean checkout.
+- Tier C end-to-end on AMD MI300A (cr66-8): 25-epoch LoRA fine-tune of
+  `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` converges from train_loss 2.38 →
+  0.09 in 33 minutes; trained adapter then synthesises system-specific masks
+  (e.g. `blk_-?\d+` for HDFS block IDs, `0x[0-9a-fA-F]+` for BGL hex literals).
+- `python -m build` produces a clean sdist + wheel; the release workflow uses
+  these artefacts.
 
 [Unreleased]: https://github.com/NightBaRron1412/DeepParse/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/NightBaRron1412/DeepParse/releases/tag/v1.0.0
