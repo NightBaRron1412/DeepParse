@@ -1,12 +1,27 @@
-"""Offline fallback synthesizer mimicking DeepSeek-R1 behaviour."""
+"""Offline fallback synthesiser mimicking DeepSeek-R1 behaviour.
+
+This module produces a regex *mask bundle* without invoking any LLM.
+The bundle mirrors what the paper's fine-tuned ``DeepSeek-R1:8B``
+checkpoint emits in Listing 2 of Section "LLM Configuration":
+
+* Always include the four core variable classes (timestamp, log level,
+  named identifier, IPv4 address).
+* Mine optional classes (HEX, UUID, PATH, EMAIL, URL, MAC) from the
+  sampled logs based on token shape.
+
+The function is fully deterministic: the output is a function of the
+sample contents only and never depends on insertion order, system
+locale, or hash randomisation.
+"""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import List, Sequence
 
 from ..masks_types import Mask
-from ..utils.regex_library import REGEX_CLASSES
 from ..tokenize import tokenize
+from ..utils.regex_library import REGEX_CLASSES
 
 
 @dataclass
@@ -14,39 +29,84 @@ class StubConfig:
     require_core_classes: bool = True
 
 
-CORE_MASKS = [
-    Mask("TIMESTAMP", r"(?P<timestamp>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})", "Matches ISO timestamps"),
-    Mask("IPV4", r"(?P<ip>(?:\d{1,3}\.){3}\d{1,3})", "Captures IPv4 addresses"),
-    Mask("NUMBER", r"(?P<number>-?\d+(?:\.\d+)?)", "Numerical literals"),
-    Mask("LOGLEVEL", r"(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)", "Standard log levels"),
-]
+CORE_LABELS = ("TIMESTAMP", "LOGLEVEL", "NUMBER", "IPV4")
 
 
-def _infer_additional_masks(logs: Sequence[str]) -> List[Mask]:
-    candidates: List[Mask] = []
-    seen = set()
+# Optional mask classes the stub may add when their shape appears in the
+# sample.  Keys are *label*, values are ``(detector_regex, free_pattern,
+# justification)``.
+_OPTIONAL_CLASSES = {
+    "HEX": (
+        re.compile(r"^0x[0-9a-fA-F]+$"),
+        r"\b0x[0-9a-fA-F]+\b",
+        "Hexadecimal identifiers (e.g. 0xDEADBEEF)",
+    ),
+    "UUID": (
+        re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"),
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+        "RFC 4122 UUIDs",
+    ),
+    "PATH": (
+        re.compile(r"^/[A-Za-z0-9_.\-/]+$"),
+        r"(?<!\S)/[A-Za-z0-9_.\-/]+",
+        "Unix-style filesystem paths",
+    ),
+    "EMAIL": (
+        re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"),
+        r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
+        "Email addresses",
+    ),
+    "URL": (
+        re.compile(r"^https?://[^\s]+$"),
+        r"https?://[^\s]+",
+        "HTTP(S) URLs",
+    ),
+    "MAC": (
+        re.compile(r"^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"),
+        r"\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b",
+        "MAC addresses",
+    ),
+}
+
+
+def _core_masks() -> List[Mask]:
+    """Return the canonical four-class core bundle in deterministic order."""
+    by_name = {cls.name: cls for cls in REGEX_CLASSES}
+    return [
+        Mask(label=name, pattern=by_name[name].free_pattern, justification=by_name[name].description)
+        for name in CORE_LABELS
+    ]
+
+
+def _infer_optional_masks(logs: Sequence[str]) -> List[Mask]:
+    found: dict[str, Mask] = {}
     for line in logs:
         for token in tokenize(line):
-            if token.startswith("0x") and token not in seen:
-                candidates.append(Mask("HEX", r"(?P<hex>0x[0-9a-fA-F]+)", "Hex identifiers"))
-                seen.add("HEX")
-            if token.startswith("/") and token not in seen:
-                candidates.append(Mask("PATH", r"(?P<path>/[^\s]+)", "Unix style path"))
-                seen.add("PATH")
-            if token.count("-") == 4 and len(token) > 10 and token not in seen:
-                candidates.append(Mask("UUID", r"(?P<uuid>[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})", "UUIDs"))
-                seen.add("UUID")
-    return candidates
+            for label, (detector, pattern, why) in _OPTIONAL_CLASSES.items():
+                if label in found:
+                    continue
+                if detector.match(token):
+                    found[label] = Mask(label=label, pattern=pattern, justification=why)
+    # Sort keys deterministically for reproducibility.
+    return [found[k] for k in sorted(found)]
 
 
 def synthesize_offline(logs: Sequence[str], config: StubConfig | None = None) -> List[Mask]:
+    """Synthesise a deterministic regex bundle from a log sample.
+
+    Always includes the four core mask classes, then opportunistically
+    adds optional classes when matching tokens appear in the sample.
+    Raises ``ValueError`` if the required core classes cannot be
+    produced (which only happens if the developer has tampered with the
+    canonical regex library).
+    """
     cfg = config or StubConfig()
-    masks = CORE_MASKS.copy()
-    masks.extend(_infer_additional_masks(logs))
+    masks = _core_masks()
+    masks.extend(_infer_optional_masks(logs))
+
     if cfg.require_core_classes:
-        required = {"TIMESTAMP", "IPV4", "NUMBER", "LOGLEVEL"}
-        available = {mask.label for mask in masks}
-        missing = required - available
+        present = {mask.label for mask in masks}
+        missing = set(CORE_LABELS) - present
         if missing:
-            raise ValueError(f"Offline stub failed to synthesise required masks: {missing}")
+            raise ValueError(f"Offline stub failed to synthesise required masks: {sorted(missing)}")
     return masks

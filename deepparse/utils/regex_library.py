@@ -1,80 +1,127 @@
-"""Canonical regex classes shared between mask synthesizers and Drain."""
+"""Canonical regex classes shared between mask synthesisers and Drain.
+
+The classes here encode the variable categories the paper expects a
+properly trained synthesis model to emit (timestamps, IPv4 addresses,
+hex literals, numbers, log levels, UUIDs, paths).  They serve two
+roles:
+
+* They are the building blocks of the offline synthesis stub when no
+  Hugging Face checkpoint is available.
+* They are used by the evaluation runner to derive *canonical* ground
+  truth templates when a dataset is shipped without an explicit
+  ``templates.json`` file.
+
+The patterns deliberately use anchored, non-greedy expressions and
+provide both an *anchored* form (for token classification) and a
+*free* form (for substitution inside a longer line).
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List
 
+from ..masks_types import Mask
+
 
 @dataclass(frozen=True)
 class RegexClass:
     name: str
-    pattern: str
+    pattern: str           # anchored form for token classification
+    free_pattern: str      # un-anchored form for line substitution
     description: str
 
-    def compile(self) -> "_PatternWrapper":
-        return _PatternWrapper(re.compile(self.pattern), self._sample_text())
+    def compile(self) -> re.Pattern[str]:
+        return re.compile(self.pattern)
 
-    def _sample_text(self) -> str:
-        return self.pattern.replace("^", "").replace("$", "").split("|")[0]
-
-
-class _DummyMatch:
-    def __init__(self, text: str):
-        self.string = text
-
-    def group(self, *_args, **_kwargs) -> str:
-        return self.string
-
-
-class _PatternWrapper:
-    def __init__(self, compiled: re.Pattern[str], sample: str):
-        self._compiled = compiled
-        self._sample = sample
-
-    def match(self, text: str, *args, **kwargs):
-        result = self._compiled.match(text, *args, **kwargs)
-        if result is None and text == self._sample:
-            return _DummyMatch(text)
-        return result
-
-    def fullmatch(self, text: str, *args, **kwargs):
-        return self._compiled.fullmatch(text, *args, **kwargs)
-
-    def __getattr__(self, item):  # pragma: no cover - simple delegation
-        return getattr(self._compiled, item)
+    def compile_free(self) -> re.Pattern[str]:
+        return re.compile(self.free_pattern)
 
 
 REGEX_CLASSES: List[RegexClass] = [
-    RegexClass("TIMESTAMP", r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$", "ISO8601 timestamp"),
-    RegexClass("IPV4", r"^(?:\d{1,3}\.){3}\d{1,3}$", "IPv4 address"),
-    RegexClass("HEX", r"^0x[0-9a-fA-F]+$", "Hexadecimal identifier"),
-    RegexClass("NUMBER", r"^-?\d+(?:\.\d+)?$", "Numeric literal"),
-    RegexClass("LOGLEVEL", r"^(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)$", "Log level token"),
-    RegexClass("UUID", r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$", "UUID identifier"),
-    RegexClass("PATH", r"^(?:/[^\s]*)$", "Unix path"),
+    RegexClass(
+        name="TIMESTAMP",
+        pattern=r"^\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$",
+        free_pattern=r"\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?",
+        description="ISO8601 timestamp",
+    ),
+    RegexClass(
+        name="IPV4",
+        pattern=r"^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$",
+        free_pattern=r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b",
+        description="IPv4 address with optional port",
+    ),
+    RegexClass(
+        name="UUID",
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        free_pattern=r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+        description="UUID identifier",
+    ),
+    RegexClass(
+        name="HEX",
+        pattern=r"^0x[0-9a-fA-F]+$",
+        free_pattern=r"\b0x[0-9a-fA-F]+\b",
+        description="Hexadecimal identifier",
+    ),
+    RegexClass(
+        name="LOGLEVEL",
+        pattern=r"^(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)$",
+        free_pattern=r"\b(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\b",
+        description="Log level token",
+    ),
+    RegexClass(
+        name="PATH",
+        pattern=r"^/[A-Za-z0-9_.\-/]+$",
+        free_pattern=r"(?<!\S)/[A-Za-z0-9_.\-/]+",
+        description="Unix-style filesystem path",
+    ),
+    RegexClass(
+        name="NUMBER",
+        pattern=r"^-?\d+(?:\.\d+)?$",
+        free_pattern=r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])",
+        description="Numeric literal",
+    ),
 ]
 
 
 def canonical_regex_map() -> Dict[str, re.Pattern[str]]:
+    """Map class name → compiled anchored pattern (for token classification)."""
     return {cls.name: cls.compile() for cls in REGEX_CLASSES}
 
 
 def classify_token(token: str) -> str | None:
+    """Return the canonical class name for ``token`` or ``None``."""
     for cls in REGEX_CLASSES:
         if cls.compile().match(token):
             return cls.name
     return None
 
 
+def canonical_masks() -> List[Mask]:
+    """Return the canonical mask bundle used as ground-truth oracle."""
+    return [
+        Mask(
+            label=cls.name,
+            pattern=cls.free_pattern,
+            justification=cls.description,
+        )
+        for cls in REGEX_CLASSES
+    ]
+
+
 def validate_regexes(regexes: Iterable[str], strict: bool = False) -> List[str]:
-    compiled: List[str] = []
+    """Validate that each regex compiles; in ``strict`` mode reject ``.*``.
+
+    Returns the validated list (unchanged) so that callers can chain
+    validation directly into a pipeline.
+    """
+    validated: List[str] = []
     for regex in regexes:
         if strict and ".*" in regex:
             raise ValueError(f"Strict mode forbids greedy pattern: {regex}")
         try:
             re.compile(regex)
-        except re.error as exc:  # pragma: no cover - error path
-            raise ValueError(f"Invalid regex {regex}: {exc}") from exc
-        compiled.append(regex)
-    return compiled
+        except re.error as exc:
+            raise ValueError(f"Invalid regex {regex!r}: {exc}") from exc
+        validated.append(regex)
+    return validated

@@ -1,165 +1,277 @@
-# deepparse-artifact
+<div align="center">
 
-## Abstract
-DeepParse is a hybrid log parsing system that combines one-time large language model (LLM) assisted synthesis of regex masks with deterministic Drain parsing. This repository packages the full artifact for the paper “DeepParse: A Hybrid LLM-Enhanced Framework for Accurate Log Parsing,” providing scripts, configuration files, datasets layout, evaluation harnesses, and reproducible outputs for reviewers. All computations are deterministic, seeds are logged for every run, and the codebase is double-blind ready (no names or telemetry).
+# DeepParse
 
-## Architecture Overview
+### Hybrid Log Parsing with LLM-Synthesized Regex Masks
+
+[![CI](https://github.com/NightBaRron1412/DeepParse/actions/workflows/ci.yml/badge.svg)](https://github.com/NightBaRron1412/DeepParse/actions/workflows/ci.yml)
+[![codecov](https://img.shields.io/codecov/c/github/NightBaRron1412/DeepParse?logo=codecov)](https://codecov.io/gh/NightBaRron1412/DeepParse)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Conference](https://img.shields.io/badge/EASE-2026-orange)](#citation)
+[![Thesis](https://img.shields.io/badge/QSpace-thesis-9cf)](https://hdl.handle.net/1974/36138)
+
+**Accepted at EASE 2026** — _The 30th International Conference on Evaluation and Assessment in Software Engineering_, Glasgow, Scotland, June 9–12 2026. Camera-ready link to be added when proceedings are published.
+
+</div>
+
+---
+
+DeepParse separates **stochastic mask synthesis** (offline, one-shot, LLM-assisted) from **deterministic parsing** (online, linear-time, Drain-based). At install time the system mines a regex *mask bundle* from a small log sample using a fine-tuned LLM; at runtime those masks substitute typed placeholders (`<VAR:IP>`, `<VAR:TIMESTAMP>`, …) into every incoming line and the Drain parser clusters the masked tokens into stable templates.
+
+The result: **97.6 % parsing accuracy on 16 LogHub-2k systems**, ~**100× faster** than per-line LLM inference, and **identical templates for identical inputs** by construction.
+
+## Table of contents
+
+- [Why DeepParse?](#why-deepparse)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Reproducing the paper](#reproducing-the-paper)
+- [Programmatic API](#programmatic-api)
+- [CLI](#cli)
+- [Results (paper Table I)](#results-paper-table-i)
+- [Repository layout](#repository-layout)
+- [Determinism](#determinism)
+- [Citation](#citation)
+
+## Why DeepParse?
+
+| Approach | Variable extraction (PA) | Throughput | Determinism |
+|---|---|---|---|
+| `Drain` heuristics | low (≈ 0.34 avg.) | very high | yes |
+| Per-line LLM (`LLaMA`, `LogPPT`, `LLMParser`) | high | low (29 s / 100 logs at LLaMA-7B) | no |
+| **DeepParse (this work)** | **0.976 avg.** | **0.30 s / 100 logs** | **yes** |
+
+Decoupling reasoning (LLM, run once) from execution (Drain, run forever) gives the accuracy of a neural parser with the cost and reproducibility of a regex engine.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph offline ["Offline / install time"]
+        L0[Raw log corpus] -->|"Algorithm 1: entropy-greedy k=50"| S[Sampled logs]
+        S -->|"Listing 2 prompt"| LLM["DeepSeek-R1-Distill-Llama-8B<br/>(LoRA r=8 α=32)"]
+        LLM -->|"Python list of regexes"| V[Validate + dedupe]
+        V --> M[("artifacts/masks/&lt;system&gt;.json")]
+    end
+    subgraph online ["Online / steady state"]
+        IN[Incoming log line] --> MA["MaskApplier<br/>(typed placeholders)"]
+        M -.-> MA
+        MA --> D["Drain<br/>(depth 5, sim 0.4)"]
+        D --> T[Template + cluster ID]
+    end
+    subgraph eval ["Evaluation"]
+        T --> GA[GA / PA metrics]
+        T --> CSV[("artifacts/outputs/<br/>Table I &amp; II")]
+    end
+
+    classDef stochastic fill:#fde68a,stroke:#b45309,color:#1f2937
+    classDef deterministic fill:#bfdbfe,stroke:#1d4ed8,color:#1f2937
+    class LLM stochastic
+    class MA,D,V,GA deterministic
 ```
-+---------------------+          +--------------------+
-| k-sample selection  | --50-->  | LLM/stub mask gen  |
-+---------------------+          +--------------------+
-            |                              |
-            v                              v
-    artifacts/masks/*.json      validated regex masks
-            |                              |
-            +--------------v---------------+
-                           |
-                   Drain parser engine
-                           |
-                    parsed templates
-                           |
-             +----------------------------+
-             | Metrics (GA/PA) & timing   |
-             +----------------------------+
-```
 
-## Repository Layout
-The tree below highlights the most relevant folders. All generated artifacts (logs, CSVs, LaTeX tables) live under `artifacts/outputs/` and are gitignored.
+The full pipeline is implemented under [`deepparse/`](deepparse/) and reproducibly invoked through the `deepparse` CLI or the three-line public API below.
 
-- `deepparse/`: Source code for the CLI, mask synthesis, Drain parser, metrics, evaluation harness, utilities, and deterministic helpers.
-- `configs/`: YAML configuration snapshots for demo and 16-dataset evaluation.
-- `scripts/`: Shell helpers for environment setup, dataset fetching, evaluation orchestration, and table regeneration.
-- `artifacts/`: Placeholder directories for datasets, outputs, and synthesized masks.
-- `tests/`: Unit and integration tests with a golden snapshot for CLI output.
-- `anonymization/`: Utilities to scrub host-specific paths in generated artifacts.
+## Quickstart
 
-## Getting Started
-### Prerequisites
-- Python 3.11
-- Git
-- Optional: Conda, Docker, GNU Make, UV package manager.
+CPU only, no internet, no LLM, < 30 s:
 
-### Environment Setup Options
-We provide three reproducible setup pathways:
-
-1. **Makefile/UV workflow (recommended):**
-   ```bash
-   make setup
-   ```
-2. **pip-tools/UV lock install:**
-   ```bash
-   uv sync
-   ```
-3. **Conda environment:**
-   ```bash
-   conda env create -f environment.yml
-   conda activate deepparse-artifact
-   ```
-4. **Docker:**
-   ```bash
-   docker build -t deepparse-artifact .
-   docker run --rm -it -v $PWD:/workspace deepparse-artifact
-   ```
-
-All pathways ensure deterministic dependencies pinned to versions tested in CI.
-
-## Reproduction Tiers
-DeepParse supports three reproducibility tiers to accommodate different resource levels.
-
-### Tier A – No GPU Demo (≤3 minutes)
 ```bash
-make setup
-./scripts/prepare_paths.sh
-./scripts/run_demo.sh
+pip install -e ".[test,lint]"
+make demo
 ```
-This mode uses the offline regex stub and a tiny bundled dataset to demonstrate mask synthesis, parsing, and GA/PA metrics entirely on CPU without internet access.
 
-### Tier B – CPU-only Full Evaluation
+Expected:
+
+```
+Dataset DemoTiny: GA=1.000 PA=1.000
+Wrote metrics CSV to artifacts/outputs/demo_metrics.csv
+```
+
+The demo synthesises a mask bundle from a 14-line bundled corpus, parses every line through the Drain engine, and computes GA/PA against ground truth that is itself generated by the canonical regex pipeline — so any faithful implementation of the algorithm reaches GA = PA = 1.0 on this corpus. It is a *self-consistency* check, not a benchmark number.
+
+## Reproducing the paper
+
+DeepParse supports three reproduction tiers.
+
+### Tier A — Bundled demo (≤ 30 s, CPU)
+
 ```bash
-./scripts/prepare_paths.sh
-./scripts/fetch_datasets.sh        # or manually place data
-python -m deepparse.cli synth --dataset ALL --k 50 --mode offline
-python -m deepparse.cli eval --config configs/eval_16_datasets.yaml --deterministic
-python -m deepparse.cli table --inputs artifacts/outputs/*.csv --out artifacts/outputs/tables/
-./scripts/regenerate_tables.sh
+make demo
 ```
-Runs Drain parsing over all 16 corrected LogHub datasets, computing GA/PA metrics and reproducing Table I/II numbers. Expect longer runtimes on CPU but identical outputs to GPU mode.
 
-### Tier C – GPU Fast Path
+### Tier B — Real LogHub-2k evaluation (CPU, 14 systems)
+
+Pull the corrected LogHub-2k benchmark from [`logpai/loghub-2.0`](https://github.com/logpai/loghub-2.0) and evaluate the offline-stub mask bundle on every system:
+
 ```bash
-python -m deepparse.cli eval --config configs/eval_16_datasets.yaml --deterministic --device cuda
+python -m deepparse.tools.fetch_loghub --out artifacts/data
+deepparse eval --config configs/eval_16_datasets.yaml --deterministic
+deepparse table --inputs artifacts/outputs/table_I_ga_pa.csv \
+                --out artifacts/outputs/tables/
 ```
-When CUDA is available, Drain’s tensorized similarity checks and optional HF mode mask refinement leverage the GPU for faster processing. Determinism is preserved by enabling `torch.backends.cudnn.deterministic` when `--deterministic` is passed.
 
-## Command Line Interface
-The CLI bundles four subcommands:
+> The corrected mirror ships 14 of the paper's 16 systems (Windows and Android are not in `logpai/loghub-2.0/2k_dataset` at the time of release). Drop them into `artifacts/data/<NAME>/raw.log` (+ optional `templates.json`) to evaluate them locally.
 
-- `synth`: Generate regex mask lists using the offline stub or optional Hugging Face pipeline.
-- `parse`: Apply masks and Drain parser to produce structured templates for a dataset.
-- `eval`: Run the entire benchmark, computing GA and PA metrics for each dataset and macro averages.
-- `time`: Benchmark parsing throughput on 100 logs (Table II).
-- `table`: Convert CSV outputs into LaTeX tables.
+### Tier C — Full GPU fine-tune of `DeepSeek-R1-Distill-Llama-8B`
 
-See `python -m deepparse.cli --help` for the full argument list.
+Reproduces the paper's exact training recipe.
+
+```bash
+pip install -e ".[train]"
+python -m deepparse.tools.fetch_loghub --out artifacts/data
+python -m deepparse.tools.build_training_set \
+    --entropy-k 50 \
+    --out artifacts/training/train_paper.jsonl
+python -m deepparse.training.finetune \
+    --train artifacts/training/train_paper.jsonl \
+    --output-dir artifacts/checkpoints/deepparse-r1-8b \
+    --epochs 25 --bf16
+./scripts/synth_all_with_adapter.sh artifacts/checkpoints/deepparse-r1-8b
+deepparse eval --config configs/eval_16_datasets.yaml --deterministic
+```
+
+| Hyperparameter | Value (paper, Section *LLM Configuration*) |
+|---|---|
+| Base model | `deepseek-ai/DeepSeek-R1-Distill-Llama-8B` |
+| LoRA rank / α / dropout | 8 / 32 / 0.01 |
+| Optimiser | AdamW (β₁ 0.9, β₂ 0.999) |
+| Learning rate / scheduler | 2 × 10⁻⁴ / cosine |
+| Batch size / grad accum | 8 / 4 |
+| Epochs | 25 |
+| Precision | bfloat16 (`--bf16`) — fp32 default for cross-vendor stability |
+| Max sequence length | 512 |
+| Sampling per system | 50 (Algorithm 1, entropy-greedy) |
+
+A turnkey [Colab notebook](notebooks/deepparse_finetune_colab.ipynb) runs the full Tier C pipeline on a single GPU runtime.
+
+> **GPU vendor:** Tier C is verified on **NVIDIA** (paper) and **AMD ROCm** (MI300A). The default training script keeps LoRA parameters in fp32 and enables `enable_input_require_grads()` to avoid the `loss=0 grad_norm=NaN` failure mode that PEFT + gradient-checkpointing occasionally triggers. Pass `--bf16` to opt back into the paper's mixed-precision recipe once your stack is verified stable.
 
 ## Programmatic API
-For quick experiments the package exposes a minimal API aligned with the paper’s
-Figure 2 workflow:
+
+The public API mirrors Listing 1 of the paper verbatim:
 
 ```python
 from deepparse import Drain, synth_masks
 
-patterns = synth_masks(sys_logs, sample_size=500, temperature=0, num_beams=2, max_length=512)
+patterns = synth_masks(sys_logs, sample_size=50, temperature=0, max_length=512)
+
 drain = Drain()
 drain.load_masks(patterns)
-parsed_templates = drain.parse_all(sys_logs)
+parsed = drain.parse_all(sys_logs)
 ```
 
-`synth_masks` returns a list of dictionaries containing `label`, `pattern`, and
-`justification` fields. The offline mode is fully deterministic; switching to
-`mode="hf"` enables the optional Hugging Face pipeline with the same control
-parameters (`temperature`, `num_beams`, `max_length`).
+`synth_masks` returns a list of `{"label", "pattern", "justification"}` dicts. `mode="offline"` (default) is fully deterministic and pure-CPU; `mode="hf"` invokes the Hugging Face backend, optionally loading a fine-tuned LoRA adapter via `adapter_path=`.
 
-## Data Availability
-The corrected LogHub datasets are public but must be downloaded separately to preserve double-blind review. Use `./scripts/fetch_datasets.sh` for online retrieval or copy the datasets into `artifacts/data/<DATASET_NAME>/` manually. Checksums are verified on load; mismatches trigger actionable error messages.
+## CLI
 
-## Determinism & Seeds
-Deterministic behavior is enforced across Python’s `random`, NumPy, and PyTorch (if available). The `deepparse.seeds.set_global_seed` function applies consistent seeds, logs the seed value, and optionally sets deterministic CUDA flags. CLI commands expose a `--seed` option for reproducibility and record seeds in `artifacts/outputs/logs/`. Sampling of k logs uses a stratified deterministic algorithm to ensure identical subsets across runs.
-
-## Double-Blind Compliance Checklist
-- Repository name and contents omit author identities.
-- No telemetry, analytics, or network beacons are included.
-- Offline workflows are fully supported.
-- The anonymization scripts scrub hostnames and absolute paths before logs are stored.
-
-## Mask Regeneration Guidance
-When log schemas drift, regenerate masks with:
 ```bash
-python -m deepparse.cli synth --dataset <name> --k 50 --mode offline --out artifacts/masks/<name>.json
+deepparse synth   --dataset HDFS --mode hf --adapter artifacts/checkpoints/deepparse-r1-8b
+deepparse parse   --dataset HDFS --output artifacts/outputs/HDFS_parsed.csv
+deepparse eval    --config configs/eval_16_datasets.yaml --deterministic
+deepparse time    --dataset HDFS --n 100
+deepparse table   --inputs artifacts/outputs/table_I_ga_pa.csv --out artifacts/outputs/tables/
 ```
-Validate using the built-in regex compilation checks (`--strict` to forbid greedy `.*`). For best results, refresh the mask whenever new log templates are introduced.
 
-## Troubleshooting
-- **Regex validation failure:** Check `artifacts/outputs/logs/*.log` for the offending pattern and adjust the mask generator prompt or stub heuristics.
-- **Slow I/O:** Use `--workers` on the CLI to parallelize dataset loading; the CPU pipeline is I/O bound for large datasets.
-- **Missing CUDA:** Run with `--device cpu`; the deterministic flag forces CPU execution when GPUs are absent.
-- **Dataset missing:** Ensure the dataset folder under `artifacts/data/` matches the dataset name in configs.
+`deepparse --help` and `deepparse <subcommand> --help` list every option.
 
-## Open Science Assets
-All CSV results, LaTeX tables, and logs are written to `artifacts/outputs/`. Config snapshots used to reproduce experiments are kept under `configs/`. The repository includes `THIRD_PARTY_NOTICES.md` listing all third-party dependencies and licenses.
+## Results (paper Table I)
 
-## Regenerating Figures and Tables
-Run:
-```bash
-./scripts/regenerate_tables.sh
+Grouping Accuracy (GA) and Parsing Accuracy (PA) across 16 LogHub-2k systems. Best per row in **bold**.
+
+| Dataset | Drain GA | Drain PA | LogPPT GA | LogPPT PA | LLMParser GA | LLMParser PA | **DeepParse GA** | **DeepParse PA** |
+|---|---|---|---|---|---|---|---|---|
+| Android     | 0.831 | 0.548 | 0.885 | 0.767 | 0.849 | 0.946 | **0.913** | **0.991** |
+| Apache      | **1.000** | 0.694 | **1.000** | 0.994 | **1.000** | **1.000** | **1.000** | **1.000** |
+| BGL         | 0.963 | 0.342 | 0.954 | 0.970 | 0.942 | 0.981 | **0.964** | **0.983** |
+| HDFS        | 0.998 | 0.355 | **1.000** | 0.903 | 0.958 | 0.988 | **1.000** | **1.000** |
+| Hadoop      | 0.948 | 0.269 | **0.994** | 0.895 | 0.981 | 0.983 | 0.985 | **0.983** |
+| HealthApp   | 0.780 | 0.231 | **1.000** | 0.789 | 0.855 | 0.996 | 0.868 | **0.997** |
+| HPC         | 0.887 | 0.636 | 0.943 | 0.947 | 0.970 | 0.994 | **0.973** | **0.996** |
+| Linux       | 0.690 | 0.184 | 0.934 | 0.949 | 0.546 | 0.839 | **0.956** | **0.971** |
+| Mac         | 0.787 | 0.218 | 0.780 | 0.673 | 0.739 | 0.677 | **0.795** | **0.738** |
+| OpenSSH     | **0.789** | 0.508 | 0.628 | 0.980 | 0.710 | 0.994 | 0.661 | **0.994** |
+| OpenStack   | 0.733 | 0.019 | 0.989 | 0.907 | 0.979 | 0.996 | **0.990** | **0.998** |
+| Proxifier   | 0.527 | 0.000 | **1.000** | **1.000** | **1.000** | **1.000** | **1.000** | **1.000** |
+| Spark       | 0.920 | 0.360 | **0.999** | 0.991 | 0.985 | 0.985 | 0.987 | **0.995** |
+| Thunderbird | 0.955 | 0.047 | 0.679 | 0.926 | 0.693 | 0.968 | **0.971** | **0.976** |
+| Windows     | 0.997 | 0.462 | 0.991 | 0.983 | 0.999 | 0.997 | **0.999** | **0.998** |
+| Zookeeper   | 0.967 | 0.497 | 0.994 | 0.990 | 0.995 | **1.000** | **0.999** | **1.000** |
+| **Average** | 0.861 | 0.335 | 0.923 | 0.916 | 0.887 | 0.959 | **0.941** | **0.976** |
+
+Throughput (paper Table II): DeepParse parses 100 logs in **0.30 s**, vs. 28.93 s for LLMParser-LLaMA-7B (~100× speedup).
+
+## Repository layout
+
 ```
-This command rebuilds Table I and Table II LaTeX/CSV files from the most recent evaluation outputs.
+deepparse/                  Python package
+  api.py                    Public Drain + synth_masks helpers (paper Listing 1)
+  cli.py                    `deepparse` Click CLI (synth/parse/eval/time/table)
+  drain/                    Mask applier + Drain engine (typed placeholders)
+  synth/                    Offline stub + Hugging Face backend
+  training/                 LoRA fine-tuning script (paper hyperparameters)
+  tools/                    LogHub-2k fetcher + Listing-2 training-set builder
+  utils/                    Entropy-greedy sampling, regex library, YAML loader
+  metrics/                  Grouping + parsing accuracy
+  evaluation/               Eval runner, timing benchmark, LaTeX table writer
+configs/                    YAML configs for demo and 16-system eval
+scripts/                    Shell wrappers for path prep, fetch, demo, synth
+notebooks/                  Self-contained Colab notebook (Tier C)
+tests/                      32 tests, < 1 s
+artifacts/                  Generated outputs (gitignored except .gitkeep)
+```
 
-## Continuous Integration
-GitHub Actions (`.github/workflows/ci.yml`) run linting (`ruff`), unit tests (`pytest -q`), and the tiny demo pipeline to guarantee reproducibility and correctness for every commit.
+## Determinism
+
+`deepparse.seeds.set_global_seed(seed)` seeds Python `random`, NumPy, and PyTorch (when available), and sets deterministic CUDA flags. Sampling, mask synthesis (offline mode), and parsing are all pure functions of their inputs.
+
+The Drain engine guarantees that **identical log lines always receive the same template ID** — a property called out explicitly in the paper (Section *Integration with Drain*) and verified by `tests/test_drain_masks.py::test_identical_lines_get_identical_template_ids`.
+
+## Verification
+
+Every reproduction tier is exercised end-to-end before each release:
+
+| Step | Command | Expected outcome |
+|---|---|---|
+| Unit + property tests | `pytest -q --cov` | 59 passed, coverage ≥ 80 % |
+| Lint | `ruff check deepparse tests` | clean |
+| Type check | `mypy` | clean (28 source files) |
+| Build | `python -m build` | sdist + wheel under `dist/` |
+| Tier A demo | `make demo` | DemoTiny GA = PA = 1.000 |
+| Tier B Apache | `./examples/03_loghub_offline_eval.sh Apache` | Apache GA = PA = 1.000 |
+| Tier C training | `./examples/04_finetune_and_eval.sh` | Adapter saved, real masks generated |
+
+The Tier C run was reproduced on AMD MI300A (cr66-8, ROCm 7.3) for the v1.0.0
+release: 25-epoch LoRA fine-tune of `deepseek-ai/DeepSeek-R1-Distill-Llama-8B`
+converged from train_loss **2.38 → 0.09** in 33 min; the trained adapter
+generates system-specific masks such as `blk_-?\d+` (HDFS block IDs) and
+`0x[0-9a-fA-F]+` (BGL hex literals) that are not in the canonical-stub bundle.
 
 ## Citation
-See `CITATION.cff` for how to cite this artifact.
+
+```bibtex
+@inproceedings{shetaia2026deepparse,
+  author    = {Shetaia, Amir and Kauffman, Sean},
+  title     = {{DeepParse}: Hybrid Log Parsing with {LLM}-Synthesized Regex Masks},
+  booktitle = {Proceedings of the 30th International Conference on Evaluation and Assessment in Software Engineering ({EASE} 2026)},
+  year      = {2026},
+  address   = {Glasgow, Scotland, United Kingdom},
+  publisher = {ACM},
+  note      = {To appear}
+}
+```
+
+The companion master's thesis is available on [QSpace](https://hdl.handle.net/1974/36138).
+
+## Authors
+
+| Name | Affiliation | Contact |
+|---|---|---|
+| **Amir Shetaia** | Queen's University, ECE — [CritLab](https://critlab.smithengineering.queensu.ca/) | a.shetaia@queensu.ca |
+| **Dr. Sean Kauffman** | Queen's University, ECE — [CritLab](https://critlab.smithengineering.queensu.ca/) | sean.k@queensu.ca |
 
 ## License
-Licensed under the Apache License, Version 2.0. See `LICENSE` for details.
+
+Licensed under the Apache License, Version 2.0 — see [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

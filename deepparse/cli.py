@@ -38,10 +38,16 @@ def _load_base_config(path: str) -> dict:
 @click.option("--k", type=int, default=None)
 @click.option("--out", type=click.Path(), required=False)
 @click.option("--mode", type=click.Choice(["offline", "hf"]), default="offline")
+@click.option("--model", "model_name", type=str, default=None,
+              help="Override base model name (default: deepseek-ai/DeepSeek-R1-Distill-Llama-8B)")
+@click.option("--adapter", type=click.Path(), default=None,
+              help="Path to a fine-tuned LoRA adapter directory")
 @click.option("--strict", is_flag=True, default=False)
 @click.option("--seed", type=int, default=None)
 @click.pass_context
-def synth(ctx: click.Context, dataset: Optional[str], config: Optional[str], k: Optional[int], out: Optional[str], mode: str, strict: bool, seed: Optional[int]) -> None:
+def synth(ctx: click.Context, dataset: Optional[str], config: Optional[str], k: Optional[int],
+          out: Optional[str], mode: str, model_name: Optional[str], adapter: Optional[str],
+          strict: bool, seed: Optional[int]) -> None:
     base = _load_base_config("configs/default.yaml")
     if config:
         conf_data = load_yaml(config)
@@ -60,7 +66,11 @@ def synth(ctx: click.Context, dataset: Optional[str], config: Optional[str], k: 
     for name in datasets:
         dataset_obj = load_dataset(name, paths)
         out_path = Path(out or paths.mask_dir / f"{name}.json")
-        synthesize_masks(dataset_obj, k, out_path, mode=mode, strict=strict)
+        synthesize_masks(
+            dataset_obj, k, out_path,
+            mode=mode, strict=strict,
+            model_name=model_name, adapter_path=adapter,
+        )
 
 
 @cli.command()
