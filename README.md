@@ -12,6 +12,7 @@
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Conference](https://img.shields.io/badge/EASE-2026-orange)](#citation)
 [![Thesis](https://img.shields.io/badge/QSpace-thesis-9cf)](https://hdl.handle.net/1974/36138)
+[![HF Adapter](https://img.shields.io/badge/%F0%9F%A4%97-Adapter-yellow)](https://huggingface.co/NightBaRron1412/deepparse-r1-8b)
 
 **Accepted at EASE 2026** — _The 30th International Conference on Evaluation and Assessment in Software Engineering_, Glasgow, Scotland, June 9–12 2026. Camera-ready link to be added when proceedings are published.
 
@@ -119,6 +120,8 @@ deepparse table --inputs artifacts/outputs/table_I_ga_pa.csv \
 ### Tier C — Full GPU fine-tune of `DeepSeek-R1-Distill-Llama-8B`
 
 Reproduces the paper's exact training recipe.
+
+> **Skip the fine-tune?** The trained LoRA adapter is published at [`NightBaRron1412/deepparse-r1-8b`](https://huggingface.co/NightBaRron1412/deepparse-r1-8b). Pass `--adapter NightBaRron1412/deepparse-r1-8b` to `deepparse synth --mode hf` to use it directly — no training required.
 
 ```bash
 pip install -e ".[train]"
